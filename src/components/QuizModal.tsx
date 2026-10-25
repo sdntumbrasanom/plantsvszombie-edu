@@ -117,28 +117,49 @@ export const QuizModal: React.FC<QuizModalProps> = ({
       <div className="relative w-full max-w-xl bg-stone-900 border-2 border-yellow-500/80 rounded-2xl shadow-2xl overflow-hidden text-stone-100 p-6 flex flex-col space-y-5 animate-in zoom-in-95 duration-150">
 
         {/* Top Header & Reward Tag */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300">
               <Zap className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-                Tantangan Otak Pintar
-              </span>
-              <h3 className="text-sm font-semibold text-stone-200">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                  Tantangan Otak Pintar
+                </span>
+                {quizState.questionNumber && quizState.totalQuestions && (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-stone-950">
+                    Soal {quizState.questionNumber} / {quizState.totalQuestions}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-xs sm:text-sm font-semibold text-stone-200">
                 {quizState.source === 'wave_alert' 
                   ? '⚠️ Zombi Datang Cepat! Jawab untuk Mempertahankan Kebun!'
                   : 'Jawab Benar untuk Mengaktifkan Kekuatan Spesial!'}
               </h3>
             </div>
           </div>
+          
+          {quizState.totalQuestions && (
+            <div className="text-right shrink-0 hidden sm:block">
+              <span className="text-[10px] text-stone-400 block">Status Permainan:</span>
+              <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                {quizState.questionNumber} dari {quizState.totalQuestions} Soal
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Reward Pill Banner */}
-        <div className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl border text-xs font-semibold ${currentReward.color}`}>
-          {currentReward.icon}
-          <span>Hadiah Jawaban Benar: {currentReward.title}</span>
+        <div className={`flex items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border text-xs font-semibold ${currentReward.color}`}>
+          <div className="flex items-center gap-2">
+            {currentReward.icon}
+            <span>Hadiah: {currentReward.title}</span>
+          </div>
+          <span className="text-[10px] text-stone-300 opacity-80 hidden sm:inline">
+            🧟 Zombi terus datang sampai semua soal selesai!
+          </span>
         </div>
 
         {/* Question Box (Kolom A) */}

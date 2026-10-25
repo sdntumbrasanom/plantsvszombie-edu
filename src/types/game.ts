@@ -109,6 +109,8 @@ export interface ActiveQuizState {
   timeLeft: number;
   totalTime: number;
   source: 'user_boost' | 'sun_orb' | 'wave_alert';
+  questionNumber?: number;
+  totalQuestions?: number;
 }
 
 export interface GameStats {
@@ -119,6 +121,7 @@ export interface GameStats {
   wave: number;
   totalWaves: number;
   level: number;
+  totalQuestions?: number;
 }
 
 export interface StudentProfile {

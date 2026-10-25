@@ -186,6 +186,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  const totalQuestions = Math.max(1, questions.length);
+  const [questionsAnsweredCount, setQuestionsAnsweredCount] = useState<number>(0);
+  const [hasFinishedAllQuestions, setHasFinishedAllQuestions] = useState<boolean>(false);
+  const currentQuestionIndexRef = useRef<number>(0);
+  const hasFinishedAllQuestionsRef = useRef<boolean>(false);
+  const hasAnnouncedFinishRef = useRef<boolean>(false);
+  const lastAutoQuizPromptTimeRef = useRef<number>(Date.now());
+  const gameStartTimeRef = useRef<number>(Date.now());
+
   const [currentWave, setCurrentWave] = useState<number>(1);
   const totalWaves = currentLevelConfig.totalWaves;
   const [waveProgress, setWaveProgress] = useState<number>(0);
@@ -221,8 +230,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     questionsAnswered: 0,
     questionsCorrect: 0,
     wave: 1,
-    totalWaves: currentLevelConfig.totalWaves,
-    level
+    totalWaves: Math.max(currentLevelConfig.totalWaves, totalQuestions),
+    level,
+    totalQuestions
   });
 
   const [quizState, setQuizState] = useState<ActiveQuizState>({
@@ -235,7 +245,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     rewardType: 'sun_boost',
     timeLeft: 15,
     totalTime: 15,
-    source: 'user_boost'
+    source: 'user_boost',
+    questionNumber: 1,
+    totalQuestions
   });
 
   const plantsRef = useRef(plants);
@@ -263,6 +275,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   gameSpeedRef.current = gameSpeed;
   currentWaveRef.current = currentWave;
   statsRef.current.level = level;
+  statsRef.current.totalQuestions = totalQuestions;
 
   const addFloatingText = useCallback((x: number, y: number, text: string, color = '#FACC15') => {
     setFloatingTexts(prev => [
@@ -273,17 +286,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   const triggerQuiz = useCallback((source: 'user_boost' | 'sun_orb' | 'wave_alert', rewardType: QuizRewardType = 'sun_boost') => {
     if (questions.length === 0) return;
-    const randomQ = questions[Math.floor(Math.random() * questions.length)];
+    const qIndex = currentQuestionIndexRef.current % questions.length;
+    const targetQ = questions[qIndex];
     const options = [
-      randomQ.correctAnswer,
-      randomQ.distractor1,
-      randomQ.distractor2,
-      randomQ.distractor3,
+      targetQ.correctAnswer,
+      targetQ.distractor1,
+      targetQ.distractor2,
+      targetQ.distractor3,
     ].filter(Boolean);
+
+    lastAutoQuizPromptTimeRef.current = Date.now();
 
     setQuizState({
       isOpen: true,
-      question: randomQ,
+      question: targetQ,
       options,
       selectedOption: null,
       isAnswered: false,
@@ -291,18 +307,30 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       rewardType,
       timeLeft: 15,
       totalTime: 15,
-      source
+      source,
+      questionNumber: Math.min(statsRef.current.questionsAnswered + 1, totalQuestions),
+      totalQuestions
     });
-  }, [questions]);
+  }, [questions, totalQuestions]);
 
   const handleQuizAnswer = useCallback((_selectedOption: string, isCorrect: boolean) => {
     statsRef.current.questionsAnswered += 1;
+    currentQuestionIndexRef.current += 1;
+    const currentAnswered = statsRef.current.questionsAnswered;
+    setQuestionsAnsweredCount(currentAnswered);
+    lastAutoQuizPromptTimeRef.current = Date.now();
+
+    if (currentAnswered >= totalQuestions) {
+      hasFinishedAllQuestionsRef.current = true;
+      setHasFinishedAllQuestions(true);
+    }
+
     if (isCorrect) {
       statsRef.current.questionsCorrect += 1;
 
       if (quizState.rewardType === 'sun_boost') {
         setSun(s => s + 30);
-        addFloatingText(50, 20, '+30 MATAHARI BONUS!', '#FACC15');
+        addFloatingText(50, 20, `+30 ☀️ BONUS! (Soal ${currentAnswered}/${totalQuestions})`, '#FACC15');
       } else if (quizState.rewardType === 'freeze_all') {
         const freezeDuration = 5500;
         setZombies(prev => prev.map(z => ({
@@ -310,14 +338,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           isFrozen: true,
           frozenUntil: Date.now() + freezeDuration
         })));
-        addFloatingText(50, 30, '❄️ SEMUA ZOMBI MEMBEKU! ❄️', '#38BDF8');
+        addFloatingText(50, 30, `❄️ SEMUA ZOMBI MEMBEKU! (${currentAnswered}/${totalQuestions}) ❄️`, '#38BDF8');
       } else if (quizState.rewardType === 'plant_food') {
         const boostDuration = 7500;
         setPlants(prev => prev.map(p => ({
           ...p,
           boostedUntil: Date.now() + boostDuration
         })));
-        addFloatingText(50, 30, '⚡ OVERDRIVE TUMBUHAN! ⚡', '#4ADE80');
+        addFloatingText(50, 30, `⚡ OVERDRIVE TUMBUHAN! (${currentAnswered}/${totalQuestions}) ⚡`, '#4ADE80');
       } else if (quizState.rewardType === 'cherry_bomb') {
         const rowCounts = [0, 0, 0, 0, 0];
         zombiesRef.current.forEach(z => {
@@ -326,12 +354,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         const targetRow = rowCounts.indexOf(Math.max(...rowCounts));
         sound.playExplosion();
         setZombies(prev => prev.filter(z => z.row !== targetRow));
-        addFloatingText(50, 30, `💥 BOM CERI BARIS ${targetRow + 1}! 💥`, '#EF4444');
+        addFloatingText(50, 30, `💥 BOM CERI BARIS ${targetRow + 1}! (${currentAnswered}/${totalQuestions}) 💥`, '#EF4444');
       }
+    } else {
+      addFloatingText(50, 30, `Jawaban Belum Tepat (${currentAnswered}/${totalQuestions} Soal)`, '#F87171');
     }
 
     setQuizState(prev => ({ ...prev, isOpen: false }));
-  }, [quizState.rewardType, addFloatingText]);
+  }, [quizState.rewardType, totalQuestions, addFloatingText]);
 
   const handleToggleSound = () => {
     const muted = sound.toggleMute();
@@ -444,6 +474,63 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showExitConfirm]);
+
+  const spawnOneZombie = useCallback((now: number) => {
+    const spawnRow = Math.floor(Math.random() * ROWS);
+
+    let zType: ZombieType = 'regular';
+    const roll = Math.random();
+
+    if (level >= 5) {
+      if (roll < 0.45) zType = 'buckethead';
+      else if (roll < 0.75) zType = 'conehead';
+      else if (roll < 0.90) zType = 'speedy';
+      else zType = 'flag';
+    } else if (level >= 4) {
+      if (roll < 0.35) zType = 'buckethead';
+      else if (roll < 0.65) zType = 'conehead';
+      else if (roll < 0.85) zType = 'speedy';
+    } else if (level >= 3) {
+      if (roll < 0.25) zType = 'buckethead';
+      else if (roll < 0.55) zType = 'conehead';
+      else if (roll < 0.70) zType = 'speedy';
+    } else if (level >= 2) {
+      if (roll < 0.40) zType = 'conehead';
+      else if (roll < 0.55) zType = 'speedy';
+    } else {
+      if (currentWaveRef.current >= 3 && roll < 0.25) zType = 'conehead';
+    }
+
+    const hpMult = currentLevelConfig.hpMultiplier;
+    const spdMult = currentLevelConfig.speedMultiplier;
+
+    let rawHp = 200;
+    if (zType === 'buckethead') rawHp = 1000;
+    else if (zType === 'conehead') rawHp = 560;
+    else if (zType === 'speedy') rawHp = 260;
+    else if (zType === 'flag') rawHp = 400;
+
+    const baseHp = Math.round(rawHp * hpMult);
+    const baseSpeed = (zType === 'speedy' ? 3.8 : 2.2) * spdMult;
+
+    const newZombie: ZombieInstance = {
+      id: `zombie-${now}-${Math.random()}`,
+      type: zType,
+      row: spawnRow,
+      x: 98,
+      hp: baseHp,
+      maxHp: baseHp,
+      speed: baseSpeed,
+      isFrozen: false,
+      frozenUntil: 0,
+      eatingPlantId: null,
+      hitFlashUntil: 0,
+      walkCycle: 0
+    };
+
+    setZombies(prev => [...prev, newZombie]);
+    if (Math.random() < 0.3) sound.playZombieGroan();
+  }, [level, currentLevelConfig]);
 
   useEffect(() => {
     let animId: number;
@@ -613,88 +700,71 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           return nextProjectiles;
         });
 
-        const zombiesPerWave = currentLevelConfig.zombiesPerWave[currentWaveRef.current - 1] || 15;
-        const spawnInterval = Math.max(1800, currentLevelConfig.spawnIntervalBase - currentWaveRef.current * 700) / gameSpeedRef.current;
+        // ========================================================
+        // ATURAN UTAMA: LAMANYA PERMAINAN DITENTUKAN DARI BANYAKNYA SOAL
+        // SELAMA SOAL BELUM SELESAI, ZOMBI AKAN TERUS BERDATANGAN!
+        // ========================================================
+        const isAllQuestionsAnswered = statsRef.current.questionsAnswered >= totalQuestions;
+        const currentWaveZombies = currentLevelConfig.zombiesPerWave[Math.min(currentWaveRef.current - 1, currentLevelConfig.zombiesPerWave.length - 1)] || 12;
+        const spawnInterval = Math.max(1600, currentLevelConfig.spawnIntervalBase - (currentWaveRef.current * 400)) / gameSpeedRef.current;
 
-        if (zombiesSpawnedInWaveRef.current < zombiesPerWave) {
-          if (now - lastZombieSpawnTimeRef.current > spawnInterval) {
-            lastZombieSpawnTimeRef.current = now;
-            zombiesSpawnedInWaveRef.current += 1;
-
-            const spawnRow = Math.floor(Math.random() * ROWS);
-
-            let zType: ZombieType = 'regular';
-            const roll = Math.random();
-
-            if (level >= 5) {
-              if (roll < 0.45) zType = 'buckethead';
-              else if (roll < 0.75) zType = 'conehead';
-              else if (roll < 0.90) zType = 'speedy';
-              else zType = 'flag';
-            } else if (level >= 4) {
-              if (roll < 0.35) zType = 'buckethead';
-              else if (roll < 0.65) zType = 'conehead';
-              else if (roll < 0.85) zType = 'speedy';
-            } else if (level >= 3) {
-              if (roll < 0.25) zType = 'buckethead';
-              else if (roll < 0.55) zType = 'conehead';
-              else if (roll < 0.70) zType = 'speedy';
-            } else if (level >= 2) {
-              if (roll < 0.40) zType = 'conehead';
-              else if (roll < 0.55) zType = 'speedy';
-            } else {
-              if (currentWaveRef.current >= 3 && roll < 0.25) zType = 'conehead';
-            }
-
-            const hpMult = currentLevelConfig.hpMultiplier;
-            const spdMult = currentLevelConfig.speedMultiplier;
-
-            let rawHp = 200;
-            if (zType === 'buckethead') rawHp = 1000;
-            else if (zType === 'conehead') rawHp = 560;
-            else if (zType === 'speedy') rawHp = 260;
-            else if (zType === 'flag') rawHp = 400;
-
-            const baseHp = Math.round(rawHp * hpMult);
-            const baseSpeed = (zType === 'speedy' ? 3.8 : 2.2) * spdMult;
-
-            const newZombie: ZombieInstance = {
-              id: `zombie-${now}-${Math.random()}`,
-              type: zType,
-              row: spawnRow,
-              x: 98,
-              hp: baseHp,
-              maxHp: baseHp,
-              speed: baseSpeed,
-              isFrozen: false,
-              frozenUntil: 0,
-              eatingPlantId: null,
-              hitFlashUntil: 0,
-              walkCycle: 0
-            };
-
-            setZombies(prev => [...prev, newZombie]);
-            if (Math.random() < 0.3) sound.playZombieGroan();
-
-            setWaveProgress(zombiesSpawnedInWaveRef.current / zombiesPerWave);
+        // Auto-prompt kuis soal secara berkala jika siswa belum membuka soal (agar siswa selalu mendapat kesempatan menjawab)
+        if (!isAllQuestionsAnswered && !quizOpenRef.current) {
+          const autoPromptInterval = 24000 / gameSpeedRef.current;
+          if (now - lastAutoQuizPromptTimeRef.current > autoPromptInterval) {
+            triggerQuiz('wave_alert', currentWaveRef.current % 2 === 0 ? 'freeze_all' : 'sun_boost');
           }
-        } else {
-          if (zombiesRef.current.length === 0) {
-            if (currentWaveRef.current < totalWaves) {
+        }
+
+        if (!isAllQuestionsAnswered) {
+          // KONDISI 1: SOAL BELUM SELESAI -> ZOMBI TERUS BERDATANGAN!
+          if (zombiesSpawnedInWaveRef.current < currentWaveZombies) {
+            if (now - lastZombieSpawnTimeRef.current > spawnInterval) {
+              lastZombieSpawnTimeRef.current = now;
+              zombiesSpawnedInWaveRef.current += 1;
+              spawnOneZombie(now);
+              setWaveProgress(Math.min(1, zombiesSpawnedInWaveRef.current / currentWaveZombies));
+            }
+          } else {
+            // Kuota gelombang ini selesai, tapi soal MASIH ADA:
+            // Jika zombi di kebun tinggal sedikit (<= 1) atau habis, langsung panggil gelombang zombi baru!
+            if (zombiesRef.current.length <= 1) {
               const nextWave = currentWaveRef.current + 1;
               setCurrentWave(nextWave);
               currentWaveRef.current = nextWave;
               zombiesSpawnedInWaveRef.current = 0;
               setWaveProgress(0);
-              setWaveAnnouncement(`Gelombang ${nextWave} Mendekat!`);
-              setTimeout(() => setWaveAnnouncement(null), 1800);
+              setWaveAnnouncement(`⚠️ Soal Belum Selesai (${statsRef.current.questionsAnswered}/${totalQuestions})! Gelombang Zombi ${nextWave} Terus Berdatangan!`);
+              setTimeout(() => setWaveAnnouncement(null), 2500);
 
-              triggerQuiz('wave_alert', nextWave >= 3 ? 'freeze_all' : 'sun_boost');
+              if (!quizOpenRef.current) {
+                triggerQuiz('wave_alert', nextWave % 2 === 0 ? 'freeze_all' : 'sun_boost');
+              }
             } else {
-              sound.playVictory();
-              confetti({ particleCount: 120, spread: 80 });
-              onVictory(statsRef.current);
+              // Jika zombi di lapangan masih ada, tetap tambahkan zombi berkala agar tekanan pertahanan berlanjut
+              if (now - lastZombieSpawnTimeRef.current > spawnInterval * 1.5) {
+                lastZombieSpawnTimeRef.current = now;
+                spawnOneZombie(now);
+              }
             }
+          }
+        } else {
+          // KONDISI 2: SELURUH SOAL TELAH SELESAI DIKERJAKAN!
+          // Pemain harus menumpas sisa zombi yang ada di lapangan untuk menang.
+          if (!hasAnnouncedFinishRef.current) {
+            hasAnnouncedFinishRef.current = true;
+            sound.playPlant();
+            confetti({ particleCount: 80, spread: 80 });
+            setWaveAnnouncement('🎉 SEMUA SOAL SELESAI DIKERJAKAN! Tumpas sisa zombi untuk MENANG!');
+            setTimeout(() => setWaveAnnouncement(null), 3500);
+          }
+
+          if (zombiesRef.current.length === 0) {
+            sound.playVictory();
+            confetti({ particleCount: 150, spread: 90 });
+            statsRef.current.totalQuestions = totalQuestions;
+            statsRef.current.wave = currentWaveRef.current;
+            onVictory(statsRef.current);
           }
         }
 
@@ -786,7 +856,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [gameSpeed, level, currentLevelConfig, triggerQuiz, onVictory, onGameOver, addFloatingText]);
+  }, [gameSpeed, level, currentLevelConfig, triggerQuiz, onVictory, onGameOver, addFloatingText, spawnOneZombie, totalQuestions]);
 
   return (
     <div className="relative w-full h-full flex flex-col bg-stone-950 select-none overflow-hidden">
@@ -858,21 +928,49 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
           <div 
             title={currentLevelConfig.name}
-            className="flex items-center gap-1.5 px-3 py-1 bg-amber-950/90 border border-amber-500/70 rounded-xl text-xs font-bold text-amber-300 shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-950/90 border border-amber-500/70 rounded-xl text-xs font-bold text-amber-300 shadow-sm"
           >
             <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
             <span>Level {level}/10</span>
           </div>
 
+          {/* Question Counter in HUD */}
+          <div 
+            title={`Soal Terjawab: ${questionsAnsweredCount} dari ${totalQuestions}. Zombi akan terus berdatangan sampai seluruh soal selesai!`}
+            className="flex items-center gap-1.5 sm:gap-2 bg-stone-950/90 border border-emerald-500/60 rounded-xl px-2.5 py-1 text-xs shadow-inner"
+          >
+            <span className="text-[10px] uppercase font-bold text-emerald-400">Soal:</span>
+            <span className="font-mono font-bold text-amber-300 tabular-nums">
+              {questionsAnsweredCount}/{totalQuestions}
+            </span>
+            <div className="w-10 sm:w-16 h-2 bg-stone-800 rounded-full overflow-hidden border border-stone-700 hidden sm:block">
+              <div 
+                className="h-full bg-gradient-to-r from-emerald-500 to-green-400 transition-all duration-300"
+                style={{ width: `${Math.min(100, (questionsAnsweredCount / totalQuestions) * 100)}%` }}
+              />
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={() => triggerQuiz('user_boost', 'sun_boost')}
-            title="Buka Kuis Otak: Jawab soal spreadsheet untuk bonus +30 Matahari & Kekuatan!"
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 transition-transform active:scale-95 animate-pulse cursor-pointer"
+            disabled={hasFinishedAllQuestions}
+            title={hasFinishedAllQuestions ? 'Semua soal telah selesai dikerjakan!' : 'Buka Soal Kuis: Jawab untuk bonus +30 Matahari & selesaikan seluruh soal untuk menang!'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 text-stone-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer ${
+              hasFinishedAllQuestions
+                ? 'bg-emerald-600/70 text-emerald-100 cursor-default shadow-none'
+                : 'bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 shadow-amber-500/20 animate-pulse'
+            }`}
           >
             <Zap className="w-4 h-4 fill-stone-950" />
-            <span className="hidden sm:inline">Kuis Soal (+30 ☀️)</span>
-            <span className="sm:hidden">Kuis</span>
+            <span className="hidden sm:inline">
+              {hasFinishedAllQuestions 
+                ? '✅ Semua Soal Selesai' 
+                : `Kuis Soal (${questionsAnsweredCount}/${totalQuestions})`}
+            </span>
+            <span className="sm:hidden">
+              {hasFinishedAllQuestions ? '✅ Selesai' : `Soal (${questionsAnsweredCount}/${totalQuestions})`}
+            </span>
           </button>
 
           <button
@@ -936,6 +1034,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             backgroundPosition: 'center'
           }}
         >
+          {/* Top In-Game Target Soal & Zombie Warning Strip */}
+          <div className="absolute top-2 left-2 right-2 sm:left-4 sm:right-4 flex items-center justify-between pointer-events-none z-30 text-[10px] sm:text-xs font-bold gap-2">
+            <div className="bg-stone-950/85 backdrop-blur-md border border-emerald-500/60 rounded-xl px-2.5 sm:px-3 py-1 flex items-center gap-2 text-stone-200 shadow-lg">
+              <span className="text-emerald-400 uppercase tracking-wider text-[9px] sm:text-[10px]">Target Soal:</span>
+              <span className="font-mono text-amber-300 font-extrabold">{questionsAnsweredCount} / {totalQuestions}</span>
+              <div className="w-12 sm:w-20 h-2 bg-stone-900 rounded-full overflow-hidden border border-stone-700">
+                <div 
+                  className="h-full bg-gradient-to-r from-emerald-500 to-green-400 transition-all duration-300"
+                  style={{ width: `${Math.min(100, (questionsAnsweredCount / totalQuestions) * 100)}%` }}
+                />
+              </div>
+              <span className="text-stone-400 font-mono text-[9px] sm:text-[10px]">
+                ({Math.round(Math.min(100, (questionsAnsweredCount / totalQuestions) * 100))}%)
+              </span>
+            </div>
+
+            {!hasFinishedAllQuestions ? (
+              <div className="bg-amber-950/90 backdrop-blur-md border border-amber-600/70 rounded-xl px-2.5 sm:px-3 py-1 text-amber-300 shadow-lg flex items-center gap-1.5 animate-pulse">
+                <span>🧟 Zombi terus datang sampai {totalQuestions - questionsAnsweredCount} soal lagi selesai!</span>
+              </div>
+            ) : (
+              <div className="bg-emerald-950/95 backdrop-blur-md border border-emerald-500/80 rounded-xl px-2.5 sm:px-3 py-1 text-emerald-300 shadow-lg flex items-center gap-1.5 font-bold">
+                <span>⭐ Semua {totalQuestions} soal selesai! Tumpas sisa zombi untuk menang!</span>
+              </div>
+            )}
+          </div>
+
           <div className="absolute inset-0 grid grid-rows-5 grid-cols-9">
             {Array.from({ length: ROWS }).map((_, r) =>
               Array.from({ length: COLS }).map((_, c) => {

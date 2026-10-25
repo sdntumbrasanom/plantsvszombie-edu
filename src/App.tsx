@@ -110,14 +110,16 @@ export default function App() {
 
   const handleStartGame = (lvl = selectedLevel) => {
     setSelectedLevel(lvl);
+    const qCount = Math.max(1, questions.length);
     setGameStats({
       zombiesKilled: 0,
       sunsCollected: 0,
       questionsAnswered: 0,
       questionsCorrect: 0,
       wave: 1,
-      totalWaves: lvl >= 8 ? 5 : lvl >= 4 ? 4 : 3,
-      level: lvl
+      totalWaves: qCount,
+      level: lvl,
+      totalQuestions: qCount
     });
     setScreen('PLAYING');
   };
